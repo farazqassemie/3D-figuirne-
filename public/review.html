@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your 3D model</title>
+<link rel="stylesheet" href="style.css">
+<!-- Pinned (not "latest") so an upstream breaking release can't silently break the viewer. -->
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+</head>
+<body>
+<div id="app"><div class="spin"></div></div>
+<p class="footer-link"><a href="index.html">Start over</a></p>
+
+<script>
+const params = new URLSearchParams(location.search);
+const jobId = params.get('job');
+// Carry whichever access token we were handed: the customer's per-job token
+// (?t=) or, for the admin dashboard, the admin token (?token=). Every job/file
+// request includes it, so a stranger without the token can't view this job.
+const authQS = params.get('t')
+  ? 't=' + encodeURIComponent(params.get('t'))
+  : params.get('token')
+    ? 'token=' + encodeURIComponent(params.get('token'))
+    : '';
+function withAuth(url) { return authQS ? url + (url.includes('?') ? '&' : '?') + authQS : url; }
+const app = document.getElementById('app');
+let lastStatus = null;
+let stageStart = Date.now();
+
+function esc(s) { return String(s).replace(/</g, '&lt;'); }
+
+// Never show vendor ids to the customer — map to the model name.
+function modelName(id) {
+  return ({ 'fal-rodin': 'Model 1', model1: 'Model 1', hi3d: 'Model 2', model2: 'Model 2', mock: 'mock' })[id] || id;
+}
+
+function viewer(src) {
+  return '<model-viewer src="' + withAuth(src) + '" camera-controls auto-rotate shadow-intensity="1"></model-viewer>';
+}
+
+function waitBlock(title, note) {
+  return '<div class="card" style="text-align:center"><h2>' + title + '</h2>' +
+    '<div class="spin"></div><div class="timer" id="timer">0:00</div>' +
+    '<p class="muted">' + note + '</p></div>';
+}
+
+function timingsTable(job) {
+  if (!job.timings.length) return '';
+  let rows = job.timings.map(t =>
+    '<tr><td>' + esc(t.stage) + '</td><td>' + esc(modelName(t.provider)) + '</td>' +
+    '<td class="num">' + (t.ms / 1000).toFixed(1) + 's</td>' +
+    '<td>' + (t.ok ? '<span class="pill ok">ok</span>' : '<span class="pill bad">failed</span>') + '</td></tr>'
+  ).join('');
+  return '<div class="card"><h2>Generation times</h2><table>' +
+    '<tr><th>Stage</th><th>Engine</th><th>Time</th><th></th></tr>' + rows + '</table></div>';
+}
+
+function render(job) {
+  const s = job.status;
+  if (s === lastStatus) return;
+  stageStart = Date.now();
+  lastStatus = s;
+
+  if (['created', 'uploaded', 'preview_running'].includes(s)) {
+    app.innerHTML = waitBlock('Building your 3D model', 'Highest quality can take several minutes — keep this page open.');
+  } else if (s === 'preview_failed') {
+    app.innerHTML = '<div class="error">Generation failed: ' + esc(job.error) + '</div>' +
+      '<button class="btn" onclick="act(\'regenerate\')">Try again</button>';
+  } else if (s === 'preview_ready') {
+    app.innerHTML = '<h1>Your 3D model</h1><p class="muted">Drag to spin. This is your AI-generated model — our artists refine every detail by hand after you order.</p>' +
+      viewer(job.files.preview) +
+      '<button class="btn" onclick="act(\'approve\')">I love it — place my order</button>' +
+      '<button class="btn secondary" onclick="act(\'regenerate\')">Regenerate (free)</button>' +
+      timingsTable(job);
+  } else if (s === 'done') {
+    app.innerHTML = '<h1>Order placed 🎉</h1>' +
+      '<p class="muted">Your model is now with our artists — final piece in a few days.</p>' +
+      (job.files.preview ? viewer(job.files.preview) : '') +
+      timingsTable(job);
+  } else if (s === 'failed') {
+    app.innerHTML = '<div class="error">' + esc(job.error) + '</div>' +
+      '<a class="btn" href="index.html">Start over</a>';
+  }
+
+  // Don't let a customer approve a preview they can't see: gate the order button
+  // on the viewer actually rendering, and surface a load failure instead of a
+  // silent empty box.
+  if (s === 'preview_ready') {
+    const mv = document.querySelector('model-viewer');
+    const orderBtn = [...document.querySelectorAll('button')].find((b) => /place my order/i.test(b.textContent));
+    if (mv && orderBtn && !mv.loaded) {
+      orderBtn.disabled = true;
+      const hint = document.createElement('p');
+      hint.className = 'muted';
+      hint.id = 'previewHint';
+      hint.style.textAlign = 'center';
+      hint.textContent = 'Preparing your 3D preview…'; // max-quality meshes are large and can take a moment
+      orderBtn.after(hint);
+      const enable = () => { orderBtn.disabled = false; hint.remove(); };
+      mv.addEventListener('load', enable, { once: true });
+      if (mv.loaded) enable();
+      // Gentle, not a red error (a valid max-quality mesh can just be slow): if it
+      // still hasn't rendered after 90s, nudge the customer — order stays disabled.
+      setTimeout(() => { if (!mv.loaded) hint.textContent = 'Still preparing — if nothing appears, refresh or regenerate.'; }, 90000);
+    }
+  }
+
+  // model-viewer occasionally never starts fetching when inserted via
+  // innerHTML. Kick it with a real attribute change (clear, then re-set on the
+  // next frame) — a same-value assignment is deduped and does nothing. Wait
+  // for the definition so we never touch an un-upgraded element.
+  customElements.whenDefined('model-viewer').then(() => {
+    setTimeout(() => {
+      document.querySelectorAll('model-viewer').forEach((m) => {
+        if (m.loaded) return;
+        const v = m.getAttribute('src');
+        if (!v) return;
+        m.removeAttribute('src');
+        // Restore via rAF AND a timeout fallback — rAF may never fire in a
+        // backgrounded tab, which would otherwise leave the viewer src empty.
+        const restore = () => { if (!m.getAttribute('src')) m.setAttribute('src', v); };
+        requestAnimationFrame(restore);
+        setTimeout(restore, 80);
+      });
+    }, 200);
+  });
+}
+
+async function act(action) {
+  try {
+    const res = await fetch(withAuth('/api/jobs/' + jobId + '/' + action), { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'That didn\'t work (' + res.status + '). Please try again.');
+    }
+  } catch {
+    alert('Network problem — please try again.');
+  }
+  lastStatus = null;
+  poll();
+}
+
+async function poll() {
+  const res = await fetch(withAuth('/api/jobs/' + jobId));
+  if (!res.ok) { app.innerHTML = '<div class="error">Job not found.</div>'; return; }
+  render(await res.json());
+}
+
+setInterval(() => {
+  const el = document.getElementById('timer');
+  if (el) {
+    const sec = Math.floor((Date.now() - stageStart) / 1000);
+    el.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+}, 1000);
+
+setInterval(poll, 3000);
+poll();
+</script>
+</body>
+</html>

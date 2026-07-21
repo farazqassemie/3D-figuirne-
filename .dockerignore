@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.env
+.env.example
+.env.testbak
+data
+.git
+.gitignore
+.claude
+.webpb-active
+.webpb-approved
+scripts
+*.md
+Dockerfile
+.dockerignore
+.DS_Store

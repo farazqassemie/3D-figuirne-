@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timing dashboard</title>
+<link rel="stylesheet" href="style.css">
+<style>body { max-width: 800px; }</style>
+</head>
+<body>
+<h1>Timing dashboard</h1>
+<p class="muted">Every generation call, timed server-side. Default engine: <span id="prov"></span><span id="bal"></span></p>
+<div class="card" style="overflow-x:auto">
+  <table id="tbl">
+    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Generation time</th><th>Created</th><th></th></tr>
+  </table>
+</div>
+<p class="footer-link"><a href="index.html">Back to app</a></p>
+
+<script>
+function esc(s) { return String(s).replace(/</g, '&lt;'); }
+
+// Show customer-facing model names, never the vendor ids.
+function modelName(id) {
+  return ({ 'fal-rodin': 'Model 1', model1: 'Model 1', hi3d: 'Model 2', model2: 'Model 2', mock: 'mock' })[id] || id || '—';
+}
+
+function previewCell(job) {
+  const runs = job.timings.filter(t => t.stage === 'AI preview');
+  if (!runs.length) return '<td class="num">—</td>';
+  return '<td class="num">' + runs.map(t =>
+    (t.ms / 1000).toFixed(1) + 's <span class="muted">(' + esc(modelName(t.provider)) + (t.ok ? '' : ' ✗') + ')</span>'
+  ).join('<br>') + '</td>';
+}
+
+function statusPill(s) {
+  const cls = s === 'done' || s === 'preview_ready' ? 'ok'
+    : s.includes('failed') ? 'bad' : 'run';
+  return '<span class="pill ' + cls + '">' + esc(s) + '</span>';
+}
+
+// Admin endpoints are gated — pass the token via the URL: /admin.html?token=YOUR_ADMIN_TOKEN
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const ADMIN = { headers: { 'x-admin-token': TOKEN } };
+
+async function load() {
+  const jobsRes = await fetch('/api/jobs', ADMIN);
+  if (jobsRes.status === 401) {
+    document.querySelector('.card').innerHTML =
+      '<div class="error">Admin access required. Set <code>ADMIN_TOKEN</code> in <code>.env</code>, then open <code>/admin.html?token=YOUR_ADMIN_TOKEN</code>.</div>';
+    return;
+  }
+  const [jobs, config] = await Promise.all([
+    jobsRes.json(),
+    fetch('/api/config').then(r => r.json()),
+  ]);
+  document.getElementById('prov').textContent = modelName(config.preview);
+  // Model 2 balance is best-effort — only shown when the provider returns a number.
+  fetch('/api/hi3d/balance', ADMIN).then(r => r.json()).then(b => {
+    document.getElementById('bal').textContent =
+      typeof b.balance === 'number' ? ' · Model 2 balance: ' + b.balance : '';
+  }).catch(() => {});
+  const tbl = document.getElementById('tbl');
+  tbl.querySelectorAll('tr:not(:first-child)').forEach(tr => tr.remove());
+  for (const job of jobs) {
+    const total = job.timings.reduce((sum, t) => sum + t.ms, 0);
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="num">' + job.id.slice(0, 6) + '</td>' +
+      '<td>' + statusPill(job.status) + '</td>' +
+      '<td>' + esc(modelName(job.engine || job.providers?.preview)) + '</td>' +
+      '<td>' + esc(job.subject || '—') + '</td>' +
+      previewCell(job) +
+      '<td class="num">' + new Date(job.createdAt).toLocaleTimeString() + '</td>' +
+      '<td><a href="review.html?job=' + job.id + '&token=' + encodeURIComponent(TOKEN) + '">open</a></td>';
+    tbl.appendChild(tr);
+  }
+}
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

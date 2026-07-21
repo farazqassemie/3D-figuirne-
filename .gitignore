@@ -1,0 +1,8 @@
+node_modules
+.env
+.env.testbak
+data/
+*.log
+.DS_Store
+.webpb-active
+.webpb-approved

@@ -1,0 +1,27 @@
+# Render Blueprint — one-click deploy with a persistent disk.
+# In Render: New → Blueprint → point at this repo. Then set the secret env vars
+# (marked sync:false) in the dashboard. A persistent disk requires a paid
+# instance type (free tier has no disk).
+services:
+  - type: web
+    name: figurine-app
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/config
+    autoDeploy: true
+    disk:
+      name: figurine-data
+      mountPath: /app/data
+      sizeGB: 10
+    envVars:
+      - key: FAL_KEY            # Rodin (Model 1) — fal.ai
+        sync: false
+      - key: HI3D_CLIENT_ID     # Hi3D (Model 2) — platform.hi3d.ai/console/apiKey
+        sync: false
+      - key: HI3D_CLIENT_SECRET
+        sync: false
+      - key: ADMIN_TOKEN        # gates /admin.html + /api/jobs; open /admin.html?token=<this>
+        sync: false
+      - key: KIRI_KEY           # currently unused (photogrammetry unwired)
+        sync: false
