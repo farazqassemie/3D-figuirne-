@@ -23,7 +23,7 @@
 <div class="choice-banner">Making: <span class="pill" id="choicePill">Model 1 · figurine</span><a href="index.html" class="muted" style="font-size:13px">change</a></div>
 <p class="muted" id="framingNote">6 photos, same framing in every one. This is what makes your model look like you.</p>
 
-<div class="guide">
+<div class="guide" id="guide">
   <h2>For the best likeness</h2>
   <ul class="do">
     <li><b>Frame from the waist up</b> — same distance in every shot (don't step closer for some)</li>
@@ -50,27 +50,46 @@
 const params = new URLSearchParams(location.search);
 const engine = params.get('engine') || 'model1';
 const subject = engine === 'model2' && params.get('subject') === 'portrait' ? 'portrait' : 'figurine';
+const isPortrait = engine === 'model2' && subject === 'portrait';
 const ENGINE_LABEL = { model1: 'Model 1', model2: 'Model 2' };
 document.getElementById('choicePill').textContent = (ENGINE_LABEL[engine] || engine) + ' · ' + subject;
-if (subject === 'portrait') {
+if (isPortrait) {
+  // A portrait uses ONE sharp front photo — Hi3D's portrait model rebuilds the
+  // whole head from a single front image, and extra hand-held views only blur
+  // the face (multi-view averaging). So we ask for just the front.
   document.getElementById('framingNote').textContent =
-    '6 photos of your head and shoulders, same framing in every one. This is what makes your portrait look like you.';
-}
-if (engine === 'model2') {
+    'One clear, straight-on photo of your head and shoulders — face the camera in soft, even light. That single sharp photo is what makes the portrait look like you.';
+  // Tailor the tips for a single portrait photo (the default multi-photo tips
+  // about "every shot" / mixed framing don't apply).
+  document.getElementById('guide').innerHTML =
+    '<h2>For the best likeness</h2>' +
+    '<ul class="do">' +
+    '<li><b>Look straight at the camera</b> — eyes open, head level, neutral expression</li>' +
+    '<li><b>Soft, even light</b> — face a window, plain wall behind you, no harsh shadows</li>' +
+    '<li><b>Fill the frame</b> — head &amp; shoulders large and in sharp focus (this is what gives skin/hair detail)</li>' +
+    '</ul>' +
+    '<ul class="avoid">' +
+    '<li><b>Take off</b> watch, glasses, and hat</li>' +
+    "<li><b>Don't</b> look down, away, or tilt your head</li>" +
+    '<li><b>JPEG or PNG only</b> — iPhone HEIC photos aren’t supported; export/share as JPEG first</li>' +
+    '</ul>';
+} else if (engine === 'model2') {
   document.getElementById('framingNote').textContent +=
     ' A straight-on Front photo is required — plus at least one of Back / Left / Right.';
 }
 
-// All slots are the SAME framing — consistent scale is what keeps the engine
-// from producing a malformed blob. Angles give the face full coverage.
-const SLOTS = [
-  { label: 'Front',        hint: 'look at camera' },
-  { label: 'Front-left',   hint: 'turn 45°, eyes to camera' },
-  { label: 'Left side',    hint: 'full profile' },
-  { label: 'Front-right',  hint: 'turn 45°, eyes to camera' },
-  { label: 'Right side',   hint: 'full profile' },
-  { label: 'Back of head', hint: 'face away' },
-];
+// Portrait = a SINGLE front photo (best facial detail). Figurine / Model 1 use
+// the full multi-angle set. All slots share the same framing/scale.
+const SLOTS = isPortrait
+  ? [{ label: 'Front photo', hint: 'face the camera · head & shoulders' }]
+  : [
+      { label: 'Front',        hint: 'look at camera' },
+      { label: 'Front-left',   hint: 'turn 45°, eyes to camera' },
+      { label: 'Left side',    hint: 'full profile' },
+      { label: 'Front-right',  hint: 'turn 45°, eyes to camera' },
+      { label: 'Right side',   hint: 'full profile' },
+      { label: 'Back of head', hint: 'face away' },
+    ];
 const files = new Array(SLOTS.length).fill(null);
 const grid = document.getElementById('grid');
 const submit = document.getElementById('submit');
@@ -85,10 +104,11 @@ function setFile(i, f) {
   slot.classList.add('filled');
   const img = slot.querySelector('img') || slot.insertBefore(document.createElement('img'), slot.firstChild);
   img.src = URL.createObjectURL(f);
-  // Model 2 is view-aware and front-first: require a straight-on Front photo plus
-  // at least 2 canonical (front/back/left/right) views. Model 1 wants any 4.
-  submit.disabled =
-    engine === 'model2'
+  // Portrait: just the one front photo. Figurine (Model 2): front + at least 2
+  // canonical (front/back/left/right) views. Model 1: any 4.
+  submit.disabled = isPortrait
+    ? !files[0]
+    : engine === 'model2'
       ? !(files[0] && [0, 5, 2, 4].filter((k) => files[k]).length >= 2)
       : files.filter(Boolean).length < 4;
 }

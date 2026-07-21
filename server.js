@@ -112,9 +112,9 @@ app.post('/api/flow3', withNewJob(3), upload.array('photos', 8), (req, res) => {
     return res.status(409).json({ error: 'That engine is not available right now.' });
   }
   const choice = engineChoiceFrom(req.body);
-  // Model 2 (Hi3D) sends only its canonical front/back/left/right views (2–4),
-  // so it needs ≥2; Model 1 uses the full spread and wants ≥4.
-  const min = choice.engine === 'model2' ? 2 : 4;
+  // Portrait (Hi3D) uses a single front photo → min 1. Figurine (Hi3D) sends its
+  // canonical front/back/left/right views → min 2. Model 1 uses the full spread → min 4.
+  const min = choice.engine === 'model2' ? (choice.subject === 'portrait' ? 1 : 2) : 4;
   if (!req.files || req.files.length < min) {
     return res.status(400).json({ error: `At least ${min} photos required` });
   }
