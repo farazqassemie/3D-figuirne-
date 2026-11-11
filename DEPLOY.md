@@ -24,18 +24,36 @@ and the in-flight jobs are per-instance).
 Copy the names from `.env.example`. Generate an `ADMIN_TOKEN` with e.g.
 `node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"`.
 
-## Option A — Render (blueprint, easiest)
-1. Push this folder to a GitHub repo (`.gitignore` already excludes `.env` and `data/`).
-2. Render → **New → Blueprint** → select the repo. It reads `render.yaml`
-   (Docker web service + a 10 GB disk at `/app/data`, health check `/api/config`).
-3. In the service's **Environment**, fill in the `sync:false` secrets above.
-4. Deploy. A persistent disk requires a paid instance type (Starter+).
+## Option A — Railway (chosen host)
+Customers are in the US, so use a **US East** region (close to customers and to fal.ai).
+`railway.json` already sets: Dockerfile build, 1 replica, health check `/api/config`,
+restart on failure. The volume and region can't be set in that file, so do them in the dashboard.
 
-## Option B — Railway
-1. Railway → **New Project → Deploy from GitHub repo** (it auto-detects the `Dockerfile`).
-2. **Variables** tab → add the env vars above.
-3. **Volumes** → add a volume mounted at `/app/data`.
-4. Deploy. Keep it at **1 replica**.
+1. Railway → **New Project → Deploy from GitHub repo** → select this repo
+   (branch `main`). It builds from the `Dockerfile` using `railway.json`.
+2. **Variables** tab → add `FAL_KEY`, `HI3D_CLIENT_ID`, `HI3D_CLIENT_SECRET`,
+   `ADMIN_TOKEN`, plus any `RODIN_*` / `HI3D_*` overrides you use locally.
+   Do not set `PORT` — Railway provides it.
+3. Right-click the service → **Attach volume** → mount path **`/app/data`**
+   (start with 5–10 GB; it can grow later).
+4. **Settings → Region** → a US East region. Keep it at **1 replica**
+   (the disk and in-flight jobs are per-instance).
+5. **Settings → Networking → Generate Domain** to get a `*.up.railway.app` URL
+   and check the app loads.
+6. Custom domain: **Settings → Networking → Custom Domain** → enter your domain →
+   add the CNAME (and TXT verification, if shown) record Railway gives you at
+   your domain registrar's DNS settings. HTTPS is issued automatically.
+
+Note: every push to `main` redeploys. With a volume attached, Railway stops the
+old instance before starting the new one, so a redeploy interrupts in-flight jobs
+(they become retryable — see "After it's live").
+
+## Option B — Render (blueprint)
+1. Render → **New → Blueprint** → select the repo. It reads `render.yaml`
+   (Docker web service + a 10 GB disk at `/app/data`, health check `/api/config`).
+2. In the service's **Environment**, fill in the `sync:false` secrets above.
+3. Deploy. A persistent disk requires a paid instance type (Starter+). Starter has
+   only 512 MB of memory, which is tight for 100 MB+ model files.
 
 ## Option C — any Docker host / VPS
 ```
