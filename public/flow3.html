@@ -182,6 +182,18 @@ grid.addEventListener('drop', (e) => {
   }
 });
 
+// Someone may open a locked option's link directly — tell them before they take
+// photos. (The server also rejects locked options, so this is only for clarity.)
+fetch('/api/engines').then(r => r.json()).then(d => {
+  const e = (d.engines || []).find(x => x.id === engine);
+  const s = e && engine === 'model2' ? (e.subjects || []).find(x => x.id === subject) : null;
+  if (e && (e.locked || (s && s.locked))) {
+    grid.hidden = true;
+    submit.hidden = true;
+    status.innerHTML = '<div class="error">This option is locked right now. <a href="index.html">Choose another option</a>.</div>';
+  }
+}).catch(() => {});
+
 submit.addEventListener('click', async () => {
   submit.disabled = true;
   status.innerHTML = '<div class="spin"></div><p class="muted" style="text-align:center">Uploading your photos…</p>';

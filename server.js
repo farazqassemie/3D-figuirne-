@@ -5,7 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { createJob, getJob, listJobs, jobDir, update } from './lib/store.js';
 import { startFlow3, approveJob, runPreview } from './lib/pipeline.js';
-import { previewProviderName, availablePreviewEngines, hi3dBalance } from './lib/providers/preview.js';
+import { previewProviderName, availablePreviewEngines, hi3dBalance, isLocked } from './lib/providers/preview.js';
 
 const app = express();
 app.use(express.json());
@@ -112,6 +112,11 @@ app.post('/api/flow3', withNewJob(3), upload.array('photos', 8), (req, res) => {
     return res.status(409).json({ error: 'That engine is not available right now.' });
   }
   const choice = engineChoiceFrom(req.body);
+  // Locked options are visible but can't be started. A request with no engine
+  // would run on the default provider (Model 1), so that's checked too.
+  if (isLocked(choice.engine || 'model1', choice.subject)) {
+    return res.status(409).json({ error: 'That option is locked right now. Please choose another one.' });
+  }
   // Portrait (Hi3D) uses a single front photo → min 1. Figurine (Hi3D) sends its
   // canonical front/back/left/right views → min 2. Model 1 uses the full spread → min 4.
   const min = choice.engine === 'model2' ? (choice.subject === 'portrait' ? 1 : 2) : 4;
@@ -147,6 +152,11 @@ app.post('/api/jobs/:id/regenerate', (req, res) => {
   if (job.token && !ownsJob(req, job)) return res.status(403).json({ error: 'Forbidden' });
   if (!['preview_ready', 'preview_failed'].includes(job.status)) {
     return res.status(409).json({ error: `Cannot regenerate in status ${job.status}` });
+  }
+  // A brand-new paid run on a locked option is blocked. Retrying a FAILED job is
+  // still allowed: it resumes the already-paid task instead of paying again.
+  if (job.status === 'preview_ready' && isLocked(job.engine || 'model1', job.subject)) {
+    return res.status(409).json({ error: 'That option is locked right now, so it can’t be regenerated.' });
   }
   const sources = (job.files.photos || []).slice(0, 5).map((p) => path.join('data', p.replace('/files/', '')));
   if (!sources.length) {

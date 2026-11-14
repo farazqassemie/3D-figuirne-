@@ -14,7 +14,7 @@
   <span class="opt-badge">Option 1</span>
   <h2>Model 1</h2>
   <p class="muted">Fast · best full-body figurine.</p>
-  <a class="btn" href="flow3.html?engine=model1&subject=figurine">Make a figurine</a>
+  <a class="btn disabled" data-engine="model1" data-href="flow3.html?engine=model1&subject=figurine">Make a figurine</a>
 </div>
 
 <div class="card" id="m2Card">
@@ -22,22 +22,34 @@
   <h2>Model 2</h2>
   <p class="muted">Highest detail · best face likeness. Choose figurine (v2.1 or the newer v3.0) or portrait.</p>
   <div class="opt-row">
-    <a class="btn disabled" id="m2Fig" data-href="flow3.html?engine=model2&subject=figurine">Figurine v2.1</a>
-    <a class="btn disabled" id="m2FigV3" data-href="flow3.html?engine=model2&subject=figurine-v3">Figurine v3.0</a>
-    <a class="btn secondary disabled" id="m2Por" data-href="flow3.html?engine=model2&subject=portrait">Portrait</a>
+    <a class="btn disabled" id="m2Fig" data-engine="model2" data-subject="figurine" data-href="flow3.html?engine=model2&subject=figurine">Figurine v2.1</a>
+    <a class="btn disabled" id="m2FigV3" data-engine="model2" data-subject="figurine-v3" data-href="flow3.html?engine=model2&subject=figurine-v3">Figurine v3.0</a>
+    <a class="btn secondary disabled" id="m2Por" data-engine="model2" data-subject="portrait" data-href="flow3.html?engine=model2&subject=portrait">Portrait</a>
   </div>
   <p class="muted opt-note" id="m2Note">Checking availability…</p>
 </div>
 
 <p class="footer-link"><a href="admin.html">Timing dashboard (internal)</a> · <span id="prov" class="muted"></span></p>
 <script>
-// Fail closed: Model 2 stays disabled unless /api/engines confirms it's live, so
-// a slow/failed check can never let a customer start an unavailable engine.
+// Fail closed: every button stays disabled unless /api/engines confirms that
+// option is live AND not locked, so a slow/failed check can never let a
+// customer start an unavailable or locked option. Locked ones say so.
 fetch('/api/engines').then(r => r.json()).then(d => {
-  const hasModel2 = (d.engines || []).some(e => e.id === 'model2');
-  if (hasModel2) {
+  const engines = d.engines || [];
+  document.querySelectorAll('.btn[data-engine]').forEach(b => {
+    const e = engines.find(x => x.id === b.dataset.engine);
+    const s = e && b.dataset.subject ? (e.subjects || []).find(x => x.id === b.dataset.subject) : null;
+    if (!e || (b.dataset.subject && !s)) return; // not available — stays disabled
+    if (e.locked || (s && s.locked)) {
+      b.textContent += ' · Locked';
+      b.title = 'This option is locked right now';
+      return;
+    }
+    b.classList.remove('disabled');
+    b.setAttribute('href', b.dataset.href);
+  });
+  if (engines.some(e => e.id === 'model2')) {
     document.getElementById('m2Note').hidden = true;
-    document.querySelectorAll('#m2Card .btn').forEach(b => { b.classList.remove('disabled'); b.setAttribute('href', b.dataset.href); });
   } else {
     document.getElementById('m2Note').textContent = 'This option isn’t available right now.';
   }
