@@ -92,10 +92,10 @@ const isModel2Figurine = engine === 'model2' && !isPortrait;
 
 // Visual example board for the chosen version (framing, distance, angles).
 document.getElementById('guideImg').src = isPortrait
-  ? 'guides/portrait.webp'
+  ? 'guide-portrait.webp'
   : isModel2Figurine
-    ? 'guides/model2-figurine.webp'
-    : 'guides/model1.webp';
+    ? 'guide-model2-figurine.webp'
+    : 'guide-model1.webp';
 
 // Portrait = a SINGLE front photo (best facial detail). Model 1 uses the full
 // 6-angle set. All slots share the same framing/scale.
