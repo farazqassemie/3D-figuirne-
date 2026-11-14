@@ -12,7 +12,7 @@
 <p class="muted">Every generation call, timed server-side. Default engine: <span id="prov"></span><span id="bal"></span></p>
 <div class="card" style="overflow-x:auto">
   <table id="tbl">
-    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Generation time</th><th>Created</th><th></th></tr>
+    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Generation time</th><th>Created</th><th>Model file</th><th></th></tr>
   </table>
 </div>
 <p class="footer-link"><a href="index.html">Back to app</a></p>
@@ -31,6 +31,16 @@ function previewCell(job) {
   return '<td class="num">' + runs.map(t =>
     (t.ms / 1000).toFixed(1) + 's <span class="muted">(' + esc(modelName(t.provider)) + (t.ok ? '' : ' ✗') + ')</span>'
   ).join('<br>') + '</td>';
+}
+
+// One-click download of the full-quality .glb. /files accepts the admin token
+// as ?token=, and `download` makes the browser save it instead of opening it.
+function downloadCell(job) {
+  const src = job.files && job.files.preview;
+  if (!src) return '<td class="muted">—</td>';
+  const name = 'figurine-' + job.id.slice(0, 6) + '.glb';
+  const href = src + (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+  return '<td><a href="' + esc(href) + '" download="' + name + '">Download</a></td>';
 }
 
 function statusPill(s) {
@@ -72,6 +82,7 @@ async function load() {
       '<td>' + esc(job.subject || '—') + '</td>' +
       previewCell(job) +
       '<td class="num">' + new Date(job.createdAt).toLocaleTimeString() + '</td>' +
+      downloadCell(job) +
       '<td><a href="review.html?job=' + job.id + '&token=' + encodeURIComponent(TOKEN) + '">open</a></td>';
     tbl.appendChild(tr);
   }
