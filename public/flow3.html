@@ -49,10 +49,15 @@
 // The engine + subject were chosen on the home page and arrive as URL params.
 const params = new URLSearchParams(location.search);
 const engine = params.get('engine') || 'model1';
-const subject = engine === 'model2' && params.get('subject') === 'portrait' ? 'portrait' : 'figurine';
+const subject = engine === 'model2' && ['portrait', 'figurine-v3'].includes(params.get('subject'))
+  ? params.get('subject')
+  : 'figurine';
 const isPortrait = engine === 'model2' && subject === 'portrait';
 const ENGINE_LABEL = { model1: 'Model 1', model2: 'Model 2' };
-document.getElementById('choicePill').textContent = (ENGINE_LABEL[engine] || engine) + ' · ' + subject;
+const SUBJECT_LABEL = engine === 'model2'
+  ? { figurine: 'figurine v2.1', 'figurine-v3': 'figurine v3.0', portrait: 'portrait' }
+  : { figurine: 'figurine' };
+document.getElementById('choicePill').textContent = (ENGINE_LABEL[engine] || engine) + ' · ' + (SUBJECT_LABEL[subject] || subject);
 if (isPortrait) {
   // A portrait uses ONE sharp front photo — Hi3D's portrait model rebuilds the
   // whole head from a single front image, and extra hand-held views only blur
