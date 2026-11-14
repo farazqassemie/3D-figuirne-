@@ -79,14 +79,30 @@ if (isPortrait) {
     '<li><b>JPEG or PNG only</b> — iPhone HEIC photos aren’t supported; export/share as JPEG first</li>' +
     '</ul>';
 } else if (engine === 'model2') {
-  document.getElementById('framingNote').textContent +=
-    ' A straight-on Front photo is required — plus at least one of Back / Left / Right.';
+  document.getElementById('framingNote').textContent =
+    '4 photos, same framing in every one. A straight-on Front photo is required — plus at least one of Back / Left / Right.';
 }
 
-// Portrait = a SINGLE front photo (best facial detail). Figurine / Model 1 use
-// the full multi-angle set. All slots share the same framing/scale.
+// Model 2 figurines (Hi3D) only accept 4 fixed views — front, back, left, right —
+// so they get exactly those 4 slots, already in Hi3D's order. 45° shots have no
+// Hi3D slot and were silently dropped, so we no longer ask for them.
+const isModel2Figurine = engine === 'model2' && !isPortrait;
+
+// Portrait = a SINGLE front photo (best facial detail). Model 1 uses the full
+// 6-angle set. All slots share the same framing/scale.
 const SLOTS = isPortrait
   ? [{ label: 'Front photo', hint: 'face the camera · head & shoulders' }]
+  : isModel2Figurine
+  ? [
+      { label: 'Front',      hint: 'look at camera' },
+      { label: 'Back',       hint: 'face away' },
+      // Hi3D's docs don't define "left" as subject-left or camera-left. We use the
+      // SUBJECT's own left/right (character-turnaround convention) and say so
+      // explicitly, so every customer shoots it the same way. If Hi3D confirms
+      // the opposite, swap these two slots' positions in CANON order.
+      { label: 'Your left side',  hint: 'exact 90° · LEFT shoulder to camera' },
+      { label: 'Your right side', hint: 'exact 90° · RIGHT shoulder to camera' },
+    ]
   : [
       { label: 'Front',        hint: 'look at camera' },
       { label: 'Front-left',   hint: 'turn 45°, eyes to camera' },
@@ -95,6 +111,9 @@ const SLOTS = isPortrait
       { label: 'Right side',   hint: 'full profile' },
       { label: 'Back of head', hint: 'face away' },
     ];
+// Slot indices of Hi3D's canonical views, in the order Hi3D reads them
+// (front, back, left, right). For Model 2 figurines the slots ARE that order.
+const CANON = [0, 1, 2, 3];
 const files = new Array(SLOTS.length).fill(null);
 const grid = document.getElementById('grid');
 const submit = document.getElementById('submit');
@@ -114,7 +133,7 @@ function setFile(i, f) {
   submit.disabled = isPortrait
     ? !files[0]
     : engine === 'model2'
-      ? !(files[0] && [0, 5, 2, 4].filter((k) => files[k]).length >= 2)
+      ? !(files[0] && CANON.filter((k) => files[k]).length >= 2)
       : files.filter(Boolean).length < 4;
 }
 
@@ -164,8 +183,6 @@ submit.addEventListener('click', async () => {
     // Model 2 is VIEW-AWARE: it reads photos positionally as front/back/left/right.
     // Send only those canonical views, in that order, with a bitmask of which are
     // present — sending a 45° angle in the wrong slot would hurt the result.
-    // Canonical view -> slot index: front=0, back=5, left=2 (profile), right=4 (profile).
-    const CANON = [0, 5, 2, 4];
     const bit = CANON.map((idx) => (files[idx] ? '1' : '0')).join('');
     const count = CANON.filter((idx) => files[idx]).length;
     if (files[0] && count >= 2) {
