@@ -3,9 +3,17 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import crypto from 'crypto';
+import fs from 'fs';
 import { createJob, getJob, listJobs, jobDir, update } from './lib/store.js';
 import { startFlow3, approveJob, runPreview } from './lib/pipeline.js';
 import { previewProviderName, availablePreviewEngines, hi3dBalance, isLocked } from './lib/providers/preview.js';
+import { retentionDays, deleteJobData, startRetentionSweeper } from './lib/retention.js';
+
+// Version of the consent wording on the upload page (flow3.html). Bump it
+// whenever that wording, the Terms, or the Privacy Policy change materially, so
+// each job records exactly which text the customer agreed to.
+const CONSENT_VERSION = '2026-11-16';
+const CONSENT_FIELDS = ['consentAge', 'consentRights', 'consentBiometric', 'consentTerms'];
 
 const app = express();
 app.use(express.json());
@@ -105,25 +113,43 @@ function engineChoiceFrom(body) {
 }
 
 app.post('/api/flow3', withNewJob(3), upload.array('photos', 8), (req, res) => {
+  // Any rejection below must not leave the customer's photos on disk.
+  const reject = (status, error) => {
+    fs.rmSync(jobDir(req.jobId), { recursive: true, force: true });
+    update(req.jobId, { status: 'failed', error, files: {} });
+    return res.status(status).json({ error });
+  };
+  // Written consent (age, rights to the photos, biometric processing, Terms and
+  // Privacy) is required BEFORE anything is processed or sent to a provider.
+  if (req.body?.consentVersion !== CONSENT_VERSION || !CONSENT_FIELDS.every((f) => req.body?.[f] === 'yes')) {
+    return reject(400, 'Please tick all the consent boxes before uploading.');
+  }
   // A recognized engine the customer explicitly picked but that isn't available
   // must be REJECTED, never silently downgraded to a lower-quality default.
   const KNOWN_ENGINES = ['model1', 'model2'];
   if (KNOWN_ENGINES.includes(req.body?.engine) && !availablePreviewEngines().some((e) => e.id === req.body.engine)) {
-    return res.status(409).json({ error: 'That engine is not available right now.' });
+    return reject(409, 'That engine is not available right now.');
   }
   const choice = engineChoiceFrom(req.body);
   // Locked options are visible but can't be started. A request with no engine
   // would run on the default provider (Model 1), so that's checked too.
   if (isLocked(choice.engine || 'model1', choice.subject)) {
-    return res.status(409).json({ error: 'That option is locked right now. Please choose another one.' });
+    return reject(409, 'That option is locked right now. Please choose another one.');
   }
   // Portrait (Hi3D) uses a single front photo → min 1. Figurine (Hi3D) sends its
   // canonical front/back/left/right views → min 2. Model 1 uses the full spread → min 4.
   const min = choice.engine === 'model2' ? (choice.subject === 'portrait' ? 1 : 2) : 4;
   if (!req.files || req.files.length < min) {
-    return res.status(400).json({ error: `At least ${min} photos required` });
+    return reject(400, `At least ${min} photos required`);
   }
-  update(req.jobId, { status: 'uploaded', ...choice });
+  // Keep a record of the written release: what was agreed to, and when.
+  const consent = {
+    version: CONSENT_VERSION,
+    at: new Date().toISOString(),
+    ...Object.fromEntries(CONSENT_FIELDS.map((f) => [f, true])),
+    userAgent: String(req.get('user-agent') || '').slice(0, 300),
+  };
+  update(req.jobId, { status: 'uploaded', consent, ...choice });
   startFlow3(req.jobId, req.files.map((f) => f.path)).catch(() => {});
   // The token is the customer's capability to view THIS job — hand it back once.
   res.json({ jobId: req.jobId, token: getJob(req.jobId).token });
@@ -169,12 +195,40 @@ app.post('/api/jobs/:id/regenerate', (req, res) => {
   res.json({ ok: true });
 });
 
+// Customer-initiated deletion of their photos and model (privacy-law requests
+// and the biometric policy's "delete any time" promise).
+app.post('/api/jobs/:id/delete', (req, res) => {
+  const job = getJob(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (job.token && !ownsJob(req, job)) return res.status(403).json({ error: 'Forbidden' });
+  if (['uploaded', 'preview_running'].includes(job.status)) {
+    return res.status(409).json({ error: 'Your model is still being made. Please delete it once it has finished.' });
+  }
+  deleteJobData(job.id, 'customer request');
+  res.json({ ok: true });
+});
+
 app.get('/api/jobs', requireAdmin, (req, res) => {
   res.json(listJobs().map(({ token, ...j }) => j)); // don't expose per-job tokens in the admin list
 });
 
 app.get('/api/config', (req, res) => {
   res.json({ preview: previewProviderName() });
+});
+
+// Business details and retention periods shown on the legal pages. Set these
+// as environment variables (Railway → Variables); unset ones show a visible
+// placeholder so they can't be missed.
+app.get('/api/legal', (req, res) => {
+  const env = (k) => (process.env[k] || '').trim();
+  res.json({
+    businessName: env('LEGAL_BUSINESS_NAME'),
+    contactEmail: env('LEGAL_CONTACT_EMAIL'),
+    mailingAddress: env('LEGAL_MAILING_ADDRESS'),
+    governingState: env('LEGAL_GOVERNING_STATE'),
+    retention: retentionDays(),
+    consentVersion: CONSENT_VERSION,
+  });
 });
 
 // The engines a customer may pick right now (drives the home-page boxes).
@@ -213,7 +267,9 @@ app.use((err, req, res, next) => {
     // Only brand-new jobs become 'failed'. A job that already has paid work
     // (a preview, a placed order) keeps its status — the upload just failed.
     if (job && ['created', 'uploaded'].includes(job.status)) {
-      update(req.jobId, { status: 'failed', error: message });
+      // A rejected upload must not leave the customer's photos behind.
+      fs.rmSync(jobDir(req.jobId), { recursive: true, force: true });
+      update(req.jobId, { status: 'failed', error: message, files: {} });
     } else if (job) {
       update(req.jobId, { error: message });
     }
@@ -233,6 +289,7 @@ function sweepInterrupted() {
   }
 }
 sweepInterrupted();
+startRetentionSweeper();
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {

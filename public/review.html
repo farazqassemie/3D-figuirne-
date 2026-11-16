@@ -81,6 +81,19 @@ function render(job) {
   } else if (s === 'failed') {
     app.innerHTML = '<div class="error">' + esc(job.error) + '</div>' +
       '<a class="btn" href="index.html">Start over</a>';
+  } else if (s === 'deleted') {
+    app.innerHTML = '<h1>Deleted</h1><p class="muted">The photos and 3D model for this job have been permanently deleted from our servers.</p>' +
+      '<a class="btn" href="index.html">Make a new one</a>';
+  }
+
+  // Privacy: the customer can delete their photos and model at any time once
+  // nothing is running (see the Biometric Data Notice).
+  if (['preview_ready', 'preview_failed', 'done', 'failed'].includes(s)) {
+    const del = document.createElement('button');
+    del.className = 'link-danger';
+    del.textContent = 'Delete my photos and model';
+    del.onclick = deleteMine;
+    app.appendChild(del);
   }
 
   // Don't let a customer approve a preview they can't see: gate the order button
@@ -127,6 +140,14 @@ function render(job) {
   });
 }
 
+async function deleteMine() {
+  const ordered = lastStatus === 'done';
+  const msg = 'Permanently delete your photos and 3D model? This can’t be undone.' +
+    (ordered ? '\n\nYou have placed an order: deleting now may mean we can’t finish your figurine.' : '');
+  if (!confirm(msg)) return;
+  await act('delete');
+}
+
 async function act(action) {
   try {
     const res = await fetch(withAuth('/api/jobs/' + jobId + '/' + action), { method: 'POST' });
@@ -158,5 +179,6 @@ setInterval(() => {
 setInterval(poll, 3000);
 poll();
 </script>
+<script src="legal.js"></script>
 </body>
 </html>

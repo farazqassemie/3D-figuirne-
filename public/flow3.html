@@ -42,6 +42,13 @@
 
 <div class="grid8" id="grid"></div>
 
+<div class="consent" id="consent">
+  <label><input type="checkbox" name="consentAge"> <span>I am 18 or older.</span></label>
+  <label><input type="checkbox" name="consentRights"> <span>These photos are of me, or I have permission from every person shown (as their parent or legal guardian, for anyone under 18). I have the rights to use these photos.</span></label>
+  <label><input type="checkbox" name="consentBiometric"> <span>I consent to my photos, which may include face geometry (biometric information), being processed by this service and its 3D-generation providers, some of which may be outside the US, including in China, only to make my 3D model, as described in the <a href="privacy.html#biometric" target="_blank">Biometric Data Notice</a>. They are deleted on the schedule in that notice, or sooner if I ask.</span></label>
+  <label><input type="checkbox" name="consentTerms"> <span>I agree to the <a href="terms.html" target="_blank">Terms of Service</a> and <a href="privacy.html" target="_blank">Privacy Policy</a>.</span></label>
+</div>
+
 <button class="btn" id="submit" disabled>Create my 3D preview</button>
 <div id="status"></div>
 
@@ -137,13 +144,24 @@ function setFile(i, f) {
   slot.classList.add('filled');
   const img = slot.querySelector('img') || slot.insertBefore(document.createElement('img'), slot.firstChild);
   img.src = URL.createObjectURL(f);
+  updateSubmit();
+}
+
+// The consent boxes must all be ticked before anything is uploaded. The server
+// checks the same fields and records which consent version was agreed to.
+const CONSENT_VERSION = '2026-11-16';
+const consentBoxes = [...document.querySelectorAll('#consent input[type=checkbox]')];
+consentBoxes.forEach((b) => b.addEventListener('change', updateSubmit));
+
+function updateSubmit() {
   // Portrait: just the one front photo. Figurine (Model 2): front + at least 2
   // canonical (front/back/left/right) views. Model 1: any 4.
-  submit.disabled = isPortrait
-    ? !files[0]
+  const photosOk = isPortrait
+    ? !!files[0]
     : engine === 'model2'
-      ? !(files[0] && CANON.filter((k) => files[k]).length >= 2)
-      : files.filter(Boolean).length < 4;
+      ? !!(files[0] && CANON.filter((k) => files[k]).length >= 2)
+      : files.filter(Boolean).length >= 4;
+  submit.disabled = !(photosOk && consentBoxes.every((b) => b.checked));
 }
 
 SLOTS.forEach((s, i) => {
@@ -190,6 +208,7 @@ fetch('/api/engines').then(r => r.json()).then(d => {
   if (e && (e.locked || (s && s.locked))) {
     grid.hidden = true;
     submit.hidden = true;
+    document.getElementById('consent').hidden = true;
     status.innerHTML = '<div class="error">This option is locked right now. <a href="index.html">Choose another option</a>.</div>';
   }
 }).catch(() => {});
@@ -198,6 +217,9 @@ submit.addEventListener('click', async () => {
   submit.disabled = true;
   status.innerHTML = '<div class="spin"></div><p class="muted" style="text-align:center">Uploading your photos…</p>';
   const form = new FormData();
+  // Consent first, so the server sees it before any photo.
+  form.append('consentVersion', CONSENT_VERSION);
+  consentBoxes.forEach((b) => form.append(b.name, b.checked ? 'yes' : 'no'));
   form.append('engine', engine); // chosen engine/subject first, then the files
   if (engine === 'model2') {
     form.append('subject', subject);
@@ -226,9 +248,10 @@ submit.addEventListener('click', async () => {
     location.href = 'review.html?job=' + data.jobId + (data.token ? '&t=' + data.token : '');
   } catch (err) {
     status.innerHTML = '<div class="error">' + err.message + '</div>';
-    submit.disabled = false;
+    updateSubmit();
   }
 });
 </script>
+<script src="legal.js"></script>
 </body>
 </html>
