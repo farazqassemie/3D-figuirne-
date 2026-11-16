@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Figurine Studio — 3D model test</title>
 <link rel="stylesheet" href="style.css">
+<style>
+  /* Compact home page: both options fit on one screen. */
+  h1 { font-size: 21px; }
+  .card { padding: 12px 14px; margin: 10px 0; }
+  .card .head { display: flex; align-items: center; gap: 8px; }
+  .card h2 { font-size: 16px; margin: 0; }
+  .card .opt-badge { margin: 0; font-size: 11px; padding: 1px 8px; }
+  .card p.muted { font-size: 13px; margin: 4px 0 8px; }
+  .card .btn { padding: 9px 8px; font-size: 14.5px; margin: 0; border-radius: 9px; line-height: 1.25; }
+  .opt-row { gap: 8px; }
+  .btn .lock { display: block; font-size: 11px; font-weight: 500; }
+</style>
 </head>
 <body>
 <h1>Turn yourself into a 3D model</h1>
@@ -12,16 +24,14 @@
 <p class="muted" id="myLink" hidden><a href="#">My generations &amp; models</a></p>
 
 <div class="card">
-  <span class="opt-badge">Option 1</span>
-  <h2>Model 1</h2>
+  <div class="head"><h2>Model 1</h2><span class="opt-badge">Option 1</span></div>
   <p class="muted">Fast · best full-body figurine.</p>
   <a class="btn disabled" data-engine="model1" data-href="flow3.html?engine=model1&subject=figurine">Make a figurine</a>
 </div>
 
 <div class="card" id="m2Card">
-  <span class="opt-badge">Option 2</span>
-  <h2>Model 2</h2>
-  <p class="muted">Highest detail · best face likeness. Choose figurine (v2.1 or the newer v3.0) or portrait.</p>
+  <div class="head"><h2>Model 2</h2><span class="opt-badge">Option 2</span></div>
+  <p class="muted">Highest detail · best face likeness.</p>
   <div class="opt-row">
     <a class="btn disabled" id="m2Fig" data-engine="model2" data-subject="figurine" data-href="flow3.html?engine=model2&subject=figurine">Figurine v2.1</a>
     <a class="btn disabled" id="m2FigV3" data-engine="model2" data-subject="figurine-v3" data-href="flow3.html?engine=model2&subject=figurine-v3">Figurine v3.0</a>
@@ -42,7 +52,7 @@ fetch('/api/engines').then(r => r.json()).then(d => {
     const s = e && b.dataset.subject ? (e.subjects || []).find(x => x.id === b.dataset.subject) : null;
     if (!e || (b.dataset.subject && !s)) return; // not available — stays disabled
     if (e.locked || (s && s.locked)) {
-      b.textContent += ' · Locked';
+      b.insertAdjacentHTML('beforeend', '<span class="lock">Locked</span>');
       b.title = 'This option is locked right now';
       return;
     }
