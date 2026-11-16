@@ -5,14 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Timing dashboard</title>
 <link rel="stylesheet" href="style.css">
-<style>body { max-width: 800px; }</style>
+<style>
+  body { max-width: 1100px; }
+  .thumbs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 260px; }
+  .thumbs a { display: block; text-align: center; font-size: 10px; color: #5d6e6a; text-decoration: none; }
+  .thumbs img { display: block; width: 48px; height: 64px; object-fit: cover; border-radius: 5px; border: 1px solid #e5e5e5; }
+</style>
 </head>
 <body>
 <h1>Timing dashboard</h1>
 <p class="muted">Every generation call, timed server-side. Default engine: <span id="prov"></span><span id="bal"></span></p>
 <div class="card" style="overflow-x:auto">
   <table id="tbl">
-    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Generation time</th><th>Created</th><th>Model file</th><th></th></tr>
+    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Generation time</th><th>Created</th><th>Photos</th><th>Model file</th><th></th></tr>
   </table>
 </div>
 <p class="footer-link"><a href="index.html">Back to app</a></p>
@@ -41,6 +46,34 @@ function downloadCell(job) {
   const name = 'figurine-' + job.id.slice(0, 6) + '.glb';
   const href = src + (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
   return '<td><a href="' + esc(href) + '" download="' + name + '">Download</a></td>';
+}
+
+// Which view each uploaded photo is, in the order the upload page sent them.
+function photoLabels(job, n) {
+  if (job.engine === 'model2') {
+    if (job.subject === 'portrait') return ['Front'];
+    const bit = job.multiViewBit;
+    if (!bit) return ['Front'];
+    return ['Front', 'Back', 'Left', 'Right'].filter((_, i) => bit[i] === '1');
+  }
+  // Model 1 sends: front, both 45°s, both profiles, then back — but skipped
+  // slots aren't marked, so names are only certain when all 6 were uploaded.
+  if (n !== 6) return [];
+  return ['Front', 'Front-left 45°', 'Front-right 45°', 'Left side', 'Right side', 'Back'];
+}
+
+// Thumbnails of the customer's uploads; click one to open it full size.
+// /files accepts the admin token as ?token=, like the Download link.
+function photosCell(job) {
+  const photos = (job.files && job.files.photos) || [];
+  if (!photos.length) return '<td class="muted">—</td>';
+  const labels = photoLabels(job, photos.length);
+  return '<td><div class="thumbs">' + photos.map((src, i) => {
+    const href = esc(src + (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN));
+    const label = esc(labels[i] || 'Photo ' + (i + 1));
+    return '<a href="' + href + '" target="_blank" rel="noopener" title="' + label + '">' +
+      '<img src="' + href + '" alt="' + label + '" loading="lazy">' + label + '</a>';
+  }).join('') + '</div></td>';
 }
 
 function statusPill(s) {
@@ -82,6 +115,7 @@ async function load() {
       '<td>' + esc(job.subject || '—') + '</td>' +
       previewCell(job) +
       '<td class="num">' + new Date(job.createdAt).toLocaleTimeString() + '</td>' +
+      photosCell(job) +
       downloadCell(job) +
       '<td><a href="review.html?job=' + job.id + '&token=' + encodeURIComponent(TOKEN) + '">open</a></td>';
     tbl.appendChild(tr);
