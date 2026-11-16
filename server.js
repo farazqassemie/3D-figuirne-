@@ -5,9 +5,13 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import { createJob, getJob, listJobs, jobDir, update } from './lib/store.js';
-import { startFlow3, approveJob, runPreview } from './lib/pipeline.js';
+import { startFlow3, runPreview } from './lib/pipeline.js';
 import { previewProviderName, availablePreviewEngines, hi3dBalance, isLocked } from './lib/providers/preview.js';
 import { retentionDays, deleteJobData, startRetentionSweeper } from './lib/retention.js';
+import {
+  pricing, paymentProvider, getPass, ownsPass, remaining, useCredit, publicPass,
+  startPackCheckout, startPrintCheckout, getPayment, publicPayment, fulfillPayment, afterPaymentUrl,
+} from './lib/commerce.js';
 
 // Version of the consent wording on the upload page (flow3.html). Bump it
 // whenever that wording, the Terms, or the Privacy Policy change materially, so
@@ -32,6 +36,10 @@ function requireAdmin(req, res, next) {
 // A caller "owns" a job if it presents that job's capability token (?t=), or the
 // admin token as a master key. This is what stops one customer from seeing
 // another's photos/model just by knowing (or guessing) a job id.
+function isAdmin(req) {
+  return !!ADMIN_TOKEN && (req.get('x-admin-token') || req.query.token) === ADMIN_TOKEN;
+}
+
 function ownsJob(req, job) {
   const t = req.query.t || req.get('x-job-token');
   if (job.token && t === job.token) return true;
@@ -142,6 +150,16 @@ app.post('/api/flow3', withNewJob(3), upload.array('photos', 8), (req, res) => {
   if (!req.files || req.files.length < min) {
     return reject(400, `At least ${min} photos required`);
   }
+  // Every generation is paid for from the customer's pass (the owner can test
+  // with the admin token). Taken LAST, after every other check has passed.
+  let passId = null;
+  if (!isAdmin(req)) {
+    const pass = getPass(req.body?.pass);
+    if (!ownsPass(pass, req.body?.pt)) return reject(402, 'Please buy a generation pack first.');
+    if (remaining(pass) < 1) return reject(402, 'You have no generations left. Buy more to continue.');
+    if (!useCredit(pass.id, req.jobId, 'generation')) return reject(402, 'You have no generations left. Buy more to continue.');
+    passId = pass.id;
+  }
   // Keep a record of the written release: what was agreed to, and when.
   const consent = {
     version: CONSENT_VERSION,
@@ -149,7 +167,7 @@ app.post('/api/flow3', withNewJob(3), upload.array('photos', 8), (req, res) => {
     ...Object.fromEntries(CONSENT_FIELDS.map((f) => [f, true])),
     userAgent: String(req.get('user-agent') || '').slice(0, 300),
   };
-  update(req.jobId, { status: 'uploaded', consent, ...choice });
+  update(req.jobId, { status: 'uploaded', consent, passId, ...choice });
   startFlow3(req.jobId, req.files.map((f) => f.path)).catch(() => {});
   // The token is the customer's capability to view THIS job — hand it back once.
   res.json({ jobId: req.jobId, token: getJob(req.jobId).token });
@@ -163,13 +181,67 @@ app.get('/api/jobs/:id', (req, res) => {
   res.json(safe);
 });
 
+// Orders are placed by paying for a print (see /print-checkout), not by a
+// free "approve" click.
 app.post('/api/jobs/:id/approve', (req, res) => {
+  res.status(410).json({ error: 'Please choose a print size and pay to place your order.' });
+});
+
+// ---- Payments -------------------------------------------------------------
+// Prices and pack sizes for the pages (single source: lib/commerce.js).
+app.get('/api/pricing', (req, res) => res.json(pricing()));
+
+// Where the browser goes to pay. Test mode: our own test page (no card details
+// are ever collected). A real provider will return its hosted checkout URL here.
+function payUrl(payment) {
+  return `pay.html?p=${payment.id}&k=${payment.token}`;
+}
+
+app.post('/api/checkout/pack', (req, res, next) => {
+  try {
+    const { payment } = startPackCheckout({
+      packId: req.body?.pack, email: req.body?.email,
+      engine: req.body?.engine, subject: req.body?.subject,
+      topUpPassId: req.body?.pass, topUpToken: req.body?.pt,
+    });
+    res.json({ payUrl: payUrl(payment) });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/jobs/:id/print-checkout', (req, res, next) => {
   const job = getJob(req.params.id);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   if (job.token && !ownsJob(req, job)) return res.status(403).json({ error: 'Forbidden' });
-  if (job.status !== 'preview_ready') return res.status(409).json({ error: `Cannot approve in status ${job.status}` });
-  approveJob(job.id).catch(() => {});
-  res.json({ ok: true });
+  try {
+    const { payment } = startPrintCheckout(job, { sizeId: req.body?.size, shipping: req.body?.shipping });
+    res.json({ payUrl: payUrl(payment) });
+  } catch (err) { next(err); }
+});
+
+// The pay page reads the amount and description (needs the payment's key).
+app.get('/api/payments/:id', (req, res) => {
+  const p = getPayment(req.params.id);
+  if (!p || p.token !== req.query.k) return res.status(404).json({ error: 'Payment not found' });
+  res.json({ ...publicPayment(p), next: p.status === 'paid' ? afterPaymentUrl(p) : null });
+});
+
+// TEST MODE ONLY: stands in for the provider confirming the payment. Disabled
+// automatically as soon as PAYMENTS_PROVIDER is set to a real provider.
+app.post('/api/payments/:id/test-complete', (req, res, next) => {
+  if (paymentProvider() !== 'test') return res.status(404).json({ error: 'Not found' });
+  const p = getPayment(req.params.id);
+  if (!p || p.token !== req.query.k) return res.status(404).json({ error: 'Payment not found' });
+  try {
+    const done = fulfillPayment(p.id, 'test');
+    res.json({ ok: true, next: afterPaymentUrl(done) });
+  } catch (err) { next(err); }
+});
+
+// A customer's pass: generations left and their models (private link).
+app.get('/api/passes/:id', (req, res) => {
+  const pass = getPass(req.params.id);
+  if (!ownsPass(pass, req.query.pt)) return res.status(404).json({ error: 'Not found' });
+  res.json(publicPass(pass));
 });
 
 app.post('/api/jobs/:id/regenerate', (req, res) => {
@@ -184,10 +256,20 @@ app.post('/api/jobs/:id/regenerate', (req, res) => {
   if (job.status === 'preview_ready' && isLocked(job.engine || 'model1', job.subject)) {
     return res.status(409).json({ error: 'That option is locked right now, so it can’t be regenerated.' });
   }
+  if (job.printOrder?.status === 'paid') {
+    return res.status(409).json({ error: 'This model has already been ordered.' });
+  }
   const sources = (job.files.photos || []).slice(0, 5).map((p) => path.join('data', p.replace('/files/', '')));
   if (!sources.length) {
     // e.g. a job that failed at photo normalization keeps no usable photos.
     return res.status(409).json({ error: 'No usable photos on this job — please start over and upload new ones.' });
+  }
+  // A regenerate of a finished model is a new paid run: it uses one generation.
+  // Retrying a FAILED run is free (it resumes the run already paid for).
+  if (job.status === 'preview_ready' && !isAdmin(req)) {
+    if (!job.passId || !useCredit(job.passId, job.id, 'regenerate')) {
+      return res.status(402).json({ error: 'You have no generations left. Buy more to regenerate.', needCredits: true });
+    }
   }
   // A retry after a failure may reuse the already-paid mesh; a regenerate from
   // preview_ready means the customer wants a different result.
@@ -209,7 +291,8 @@ app.post('/api/jobs/:id/delete', (req, res) => {
 });
 
 app.get('/api/jobs', requireAdmin, (req, res) => {
-  res.json(listJobs().map(({ token, ...j }) => j)); // don't expose per-job tokens in the admin list
+  // Don't expose per-job tokens in the admin list; add the customer's email.
+  res.json(listJobs().map(({ token, ...j }) => ({ ...j, customerEmail: j.passId ? getPass(j.passId)?.email || null : null })));
 });
 
 app.get('/api/config', (req, res) => {

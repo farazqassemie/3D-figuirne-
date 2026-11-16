@@ -14,13 +14,20 @@
   .guide .avoid b { color: #b42318; }
   .slot .hint { position: relative; z-index: 1; display: block; font-size: 10.5px; color: #5d6e6a; margin-top: 2px; background: rgba(255,255,255,0.85); padding: 1px 6px; border-radius: 5px; }
   .slot.filled .hint, .slot.filled .label { opacity: 0; }
+  .grid8.compact { gap: 8px; }
+  .grid8.compact .slot { font-size: 12px; padding: 4px; text-align: center; }
+  .grid8.compact .slot .label { padding: 1px 6px; }
+  .grid8.compact .slot .hint { font-size: 9.5px; line-height: 1.25; margin-top: 3px; padding: 1px 4px; }
   .choice-banner { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 2px 0 14px; }
   .choice-banner .pill { background: #e2f3ef; color: #0f766e; }
+  #passBar .left { font-size: 17px; font-weight: 700; }
+  #passBar .copy { background: none; border: none; color: #0f766e; text-decoration: underline; cursor: pointer; font-size: 13px; padding: 0; }
 </style>
 </head>
 <body>
 <h1>Take your photos</h1>
 <div class="choice-banner">Making: <span class="pill" id="choicePill">Model 1 · figurine</span><a href="index.html" class="muted" style="font-size:13px">change</a></div>
+<div class="card" id="passBar" style="padding:12px 14px" hidden></div>
 <p class="muted" id="framingNote">6 photos, same framing in every one. This is what makes your model look like you.</p>
 
 <img id="guideImg" alt="Example photos: framing, distance and angles" style="display:block;width:100%;height:auto;border-radius:12px;border:1px solid #e5e5e5;margin:0 0 16px">
@@ -54,6 +61,7 @@
 
 <p class="footer-link"><a href="index.html">Back</a></p>
 
+<script src="checkout.js"></script>
 <script>
 // The engine + subject were chosen on the home page and arrive as URL params.
 const params = new URLSearchParams(location.search);
@@ -116,8 +124,8 @@ const SLOTS = isPortrait
       // follow the example board above (Left side = facing the RIGHT edge of the
       // photo), so every customer shoots it the same way. If a swap test shows
       // Hi3D means the opposite, swap these two slots' positions in CANON order.
-      { label: 'Left side 90°',  hint: 'as in the example · face the right edge of the photo' },
-      { label: 'Right side 90°', hint: 'as in the example · face the left edge of the photo' },
+      { label: 'Left side 90°',  hint: 'face the right edge' },
+      { label: 'Right side 90°', hint: 'face the left edge' },
     ]
   : [
       { label: 'Front',        hint: 'look at camera' },
@@ -136,6 +144,11 @@ const submit = document.getElementById('submit');
 const status = document.getElementById('status');
 
 const slots = [];
+
+// Compact layout: the 4 Model 2 views fit in ONE row, Model 1's 6 views in two
+// rows of 3, and the single portrait slot stays half width.
+grid.classList.add('compact');
+grid.style.gridTemplateColumns = 'repeat(' + (SLOTS.length === 6 ? 3 : SLOTS.length === 1 ? 2 : 4) + ', 1fr)';
 
 function setFile(i, f) {
   if (!f || !f.type.startsWith('image/')) return;
@@ -202,6 +215,44 @@ grid.addEventListener('drop', (e) => {
 
 // Someone may open a locked option's link directly — tell them before they take
 // photos. (The server also rejects locked options, so this is only for clarity.)
+// ---- Paid generations ------------------------------------------------------
+// The pass (from the payment) carries the customer's generations. The owner can
+// test without paying by opening this page with ?token=ADMIN_TOKEN.
+const PASS = params.get('pass'), PT = params.get('pt'), ADMIN_TOKEN = params.get('token');
+const passBar = document.getElementById('passBar');
+function hideUpload() {
+  grid.hidden = true; submit.hidden = true; document.getElementById('consent').hidden = true;
+}
+function needCredits(text, topUp) {
+  hideUpload();
+  passBar.hidden = false;
+  passBar.innerHTML = '<p style="margin:0 0 6px">' + text + '</p><button class="btn" id="buyBtn">See prices</button>';
+  document.getElementById('buyBtn').onclick = () =>
+    openPackBox(topUp ? { engine, subject, pass: PASS, pt: PT } : { engine, subject });
+}
+async function loadPass() {
+  if (ADMIN_TOKEN) {
+    passBar.hidden = false;
+    passBar.innerHTML = '<span class="muted">Owner test mode — no generation is charged to a customer.</span>';
+    return;
+  }
+  if (!PASS || !PT) return needCredits('Choose your generations to start.', false);
+  const p = await fetch('/api/passes/' + encodeURIComponent(PASS) + '?pt=' + encodeURIComponent(PT)).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (!p) return needCredits('We couldn’t find your generations. Please check your link, or buy a pack.', false);
+  rememberPass(PASS, PT);
+  if (p.remaining < 1) return needCredits('You have no generations left.', true);
+  passBar.hidden = false;
+  passBar.innerHTML =
+    '<div class="left">You have ' + p.remaining + ' generation' + (p.remaining === 1 ? '' : 's') + ' left</div>' +
+    '<span class="muted" style="font-size:13px">Keep your private link to come back to your models: </span>' +
+    '<button class="copy" id="copyLink">copy my link</button>';
+  document.getElementById('copyLink').onclick = async (e) => {
+    try { await navigator.clipboard.writeText(passLink(PASS, PT)); e.target.textContent = 'copied ✓'; }
+    catch { prompt('Copy your private link:', passLink(PASS, PT)); }
+  };
+}
+loadPass();
+
 fetch('/api/engines').then(r => r.json()).then(d => {
   const e = (d.engines || []).find(x => x.id === engine);
   const s = e && engine === 'model2' ? (e.subjects || []).find(x => x.id === subject) : null;
@@ -220,6 +271,7 @@ submit.addEventListener('click', async () => {
   // Consent first, so the server sees it before any photo.
   form.append('consentVersion', CONSENT_VERSION);
   consentBoxes.forEach((b) => form.append(b.name, b.checked ? 'yes' : 'no'));
+  if (PASS) { form.append('pass', PASS); form.append('pt', PT); }
   form.append('engine', engine); // chosen engine/subject first, then the files
   if (engine === 'model2') {
     form.append('subject', subject);
@@ -242,10 +294,12 @@ submit.addEventListener('click', async () => {
     PRIORITY.forEach((i) => files[i] && form.append('photos', files[i]));
   }
   try {
-    const res = await fetch('/api/flow3', { method: 'POST', body: form });
+    const res = await fetch('/api/flow3', { method: 'POST', body: form, headers: ADMIN_TOKEN ? { 'x-admin-token': ADMIN_TOKEN } : {} });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 402) { status.innerHTML = ''; return needCredits(data.error, !!PASS); }
     if (!res.ok) throw new Error(data.error || 'Upload failed (' + res.status + ')');
-    location.href = 'review.html?job=' + data.jobId + (data.token ? '&t=' + data.token : '');
+    location.href = 'review.html?job=' + data.jobId + (data.token ? '&t=' + data.token : '') +
+      (PASS ? '&pass=' + PASS + '&pt=' + PT : '') + (ADMIN_TOKEN ? '&token=' + encodeURIComponent(ADMIN_TOKEN) : '');
   } catch (err) {
     status.innerHTML = '<div class="error">' + err.message + '</div>';
     updateSubmit();

@@ -120,3 +120,5 @@ input[type="file"] { display: none; }
 .consent label { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; margin: 8px 0; cursor: pointer; }
 .consent input { margin-top: 3px; flex: none; width: 17px; height: 17px; accent-color: #0f766e; }
 .link-danger { background: none; border: none; color: #b42318; text-decoration: underline; font-size: 13.5px; cursor: pointer; display: block; margin: 18px auto 0; }
+
+[hidden] { display: none !important; }

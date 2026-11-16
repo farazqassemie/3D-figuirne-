@@ -17,7 +17,7 @@
 <p class="muted">Every generation call, timed server-side. Default engine: <span id="prov"></span><span id="bal"></span></p>
 <div class="card" style="overflow-x:auto">
   <table id="tbl">
-    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Generation time</th><th>Created</th><th>Photos</th><th>Model file</th><th></th></tr>
+    <tr><th>Job</th><th>Status</th><th>Engine</th><th>Subject</th><th>Customer</th><th>Print order</th><th>Generation time</th><th>Created</th><th>Photos</th><th>Model file</th><th></th></tr>
   </table>
 </div>
 <p class="footer-link"><a href="index.html">Back to app</a></p>
@@ -76,6 +76,16 @@ function photosCell(job) {
   }).join('') + '</div></td>';
 }
 
+// Paid print orders show size + ship-to; unpaid checkouts show as pending.
+function printCell(job) {
+  const o = job.printOrder;
+  if (!o) return '<td class="muted">—</td>';
+  if (o.status !== 'paid') return '<td class="muted">' + esc(o.size) + ' · awaiting payment</td>';
+  const a = o.shipping || {};
+  return '<td><b>' + esc(o.size) + '</b> · $' + (o.cents / 100).toFixed(2) + ' paid<br><span class="muted" style="font-size:12px">' +
+    [a.name, a.line1, a.line2, [a.city, a.state, a.zip].join(' '), a.phone].filter(Boolean).map(esc).join('<br>') + '</span></td>';
+}
+
 function statusPill(s) {
   const cls = s === 'done' || s === 'preview_ready' ? 'ok'
     : s.includes('failed') ? 'bad' : 'run';
@@ -113,6 +123,8 @@ async function load() {
       '<td>' + statusPill(job.status) + '</td>' +
       '<td>' + esc(modelName(job.engine || job.providers?.preview)) + '</td>' +
       '<td>' + esc(job.subject || '—') + '</td>' +
+      '<td>' + (job.customerEmail ? esc(job.customerEmail) : '<span class="muted">owner test</span>') + '</td>' +
+      printCell(job) +
       previewCell(job) +
       '<td class="num">' + new Date(job.createdAt).toLocaleTimeString() + '</td>' +
       photosCell(job) +

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My generations</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>My generations</h1>
+<div id="app"><div class="spin"></div></div>
+<p class="footer-link"><a href="index.html">Home</a></p>
+
+<script src="checkout.js"></script>
+<script>
+// The customer's private page: generations left, buy more, and every model
+// they've made. Anyone with this link can see it, so it's only shown to them.
+const q = new URLSearchParams(location.search);
+const PASS = q.get('pass'), PT = q.get('pt');
+const app = document.getElementById('app');
+const esc = (s) => String(s).replace(/</g, '&lt;');
+const NAME = { figurine: 'Figurine v2.1', 'figurine-v3': 'Figurine v3.0', portrait: 'Portrait' };
+const STATUS = { uploaded: 'Building…', preview_running: 'Building…', preview_ready: 'Ready', preview_failed: 'Failed — open to retry free', done: 'Print ordered', failed: 'Failed', deleted: 'Deleted' };
+
+async function load() {
+  const res = await fetch('/api/passes/' + encodeURIComponent(PASS) + '?pt=' + encodeURIComponent(PT));
+  if (!res.ok) { app.innerHTML = '<div class="error">This link isn’t valid. Check you copied the whole link.</div>'; return; }
+  const p = await res.json();
+  rememberPass(PASS, PT);
+  app.innerHTML =
+    '<div class="card"><div style="font-size:30px;font-weight:700">' + p.remaining + '</div>' +
+    '<div class="muted">generation' + (p.remaining === 1 ? '' : 's') + ' left · ' + p.used + ' used</div>' +
+    (p.remaining > 0 ? '<a class="btn" href="index.html">Make a new model</a>' : '') +
+    '<button class="btn secondary" id="buy">Buy more generations</button>' +
+    '<p class="muted" style="font-size:13px">This page is your private link — bookmark it or <button id="copy" style="background:none;border:none;color:#0f766e;text-decoration:underline;cursor:pointer;padding:0;font-size:13px">copy it</button>. Anyone with the link can see your models.</p></div>' +
+    '<h2>My models</h2>' +
+    (p.jobs.length
+      ? '<div class="card" style="padding:6px 14px">' + p.jobs.slice().reverse().map(j =>
+          '<p style="display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #eef2f1;padding:8px 0;margin:0">' +
+          '<span>' + esc(NAME[j.subject] || 'Model 1 figurine') + '<br><span class="muted" style="font-size:12.5px">' + new Date(j.createdAt).toLocaleString() + '</span></span>' +
+          '<span style="text-align:right">' + esc(STATUS[j.status] || j.status) +
+          (j.status !== 'deleted' ? '<br><a href="review.html?job=' + j.id + '&t=' + j.token + '&pass=' + PASS + '&pt=' + PT + '">open</a>' : '') + '</span></p>'
+        ).join('') + '</div>'
+      : '<p class="muted">No models yet.</p>');
+  document.getElementById('buy').onclick = () => openPackBox({ pass: PASS, pt: PT });
+  document.getElementById('copy').onclick = async (e) => {
+    try { await navigator.clipboard.writeText(passLink(PASS, PT)); e.target.textContent = 'copied ✓'; }
+    catch { prompt('Copy your private link:', passLink(PASS, PT)); }
+  };
+}
+load();
+</script>
+<script src="legal.js"></script>
+</body>
+</html>

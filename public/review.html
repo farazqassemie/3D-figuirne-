@@ -68,15 +68,22 @@ function render(job) {
     app.innerHTML = '<div class="error">Generation failed: ' + esc(job.error) + '</div>' +
       '<button class="btn" onclick="act(\'regenerate\')">Try again</button>';
   } else if (s === 'preview_ready') {
-    app.innerHTML = '<h1>Your 3D model</h1><p class="muted">Drag to spin. This is your AI-generated model — our artists refine every detail by hand after you order.</p>' +
+    app.innerHTML = '<h1>Your 3D model</h1><p class="muted">Drag to spin. This is your AI-generated model — our artists refine every detail by hand when you order a print.</p>' +
       viewer(job.files.preview) +
-      '<button class="btn" onclick="act(\'approve\')">I love it — place my order</button>' +
-      '<button class="btn secondary" onclick="act(\'regenerate\')">Regenerate (free)</button>' +
+      downloadBtn(job) +
+      '<button class="btn" id="printBtn" onclick="showPrint()">Order a 3D print</button>' +
+      '<div id="printBox"></div>' +
+      '<button class="btn ghost" onclick="regenerate()">Regenerate (uses 1 generation)</button>' +
+      myLink() +
       timingsTable(job);
   } else if (s === 'done') {
+    const o = job.printOrder || {};
+    const a = o.shipping || {};
     app.innerHTML = '<h1>Order placed 🎉</h1>' +
-      '<p class="muted">Your model is now with our artists — final piece in a few days.</p>' +
-      (job.files.preview ? viewer(job.files.preview) : '') +
+      '<p class="muted">Your ' + esc(o.size || '') + ' figurine is now with our artists. We’ll ship it to:</p>' +
+      '<p style="font-size:14px">' + [a.name, a.line1, a.line2, [a.city, a.state, a.zip].filter(Boolean).join(' ')].filter(Boolean).map(esc).join('<br>') + '</p>' +
+      (job.files.preview ? viewer(job.files.preview) + downloadBtn(job) : '') +
+      myLink() +
       timingsTable(job);
   } else if (s === 'failed') {
     app.innerHTML = '<div class="error">' + esc(job.error) + '</div>' +
@@ -101,7 +108,7 @@ function render(job) {
   // silent empty box.
   if (s === 'preview_ready') {
     const mv = document.querySelector('model-viewer');
-    const orderBtn = [...document.querySelectorAll('button')].find((b) => /place my order/i.test(b.textContent));
+    const orderBtn = document.getElementById('printBtn');
     if (mv && orderBtn && !mv.loaded) {
       orderBtn.disabled = true;
       const hint = document.createElement('p');
@@ -148,6 +155,70 @@ async function deleteMine() {
   await act('delete');
 }
 
+// ---- Download, print order, paid regenerate -------------------------------
+const PASS = params.get('pass'), PT = params.get('pt');
+const money = (c) => '$' + (c / 100).toFixed(2);
+
+function downloadBtn(job) {
+  if (!job.files || !job.files.preview) return '';
+  const ext = job.files.preview.split('?')[0].split('.').pop();
+  return '<a class="btn secondary" href="' + esc(withAuth(job.files.preview)) + '" download="my-3d-model-' + job.id.slice(0, 6) + '.' + esc(ext) + '">Download 3D file (included)</a>';
+}
+
+function myLink() {
+  return PASS ? '<p class="footer-link"><a href="pass.html?pass=' + encodeURIComponent(PASS) + '&pt=' + encodeURIComponent(PT) + '">My generations &amp; models</a></p>' : '';
+}
+
+async function regenerate() {
+  if (!confirm('Regenerate? This makes a brand-new model and uses 1 generation.')) return;
+  const res = await fetch(withAuth('/api/jobs/' + jobId + '/regenerate'), { method: 'POST' });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 402 && PASS && window.openPackBox) { openPackBox({ pass: PASS, pt: PT }); return; }
+  if (!res.ok) { alert(data.error || 'That didn’t work. Please try again.'); return; }
+  lastStatus = null;
+  poll();
+}
+
+async function showPrint() {
+  const box = document.getElementById('printBox');
+  document.getElementById('printBtn').style.display = 'none';
+  const pricing = await fetch('/api/pricing').then(r => r.json());
+  const f = (id, label, attrs) => '<label style="display:block;font-size:13.5px;margin:6px 0">' + label +
+    '<input id="' + id + '" ' + (attrs || '') + ' style="width:100%;padding:10px;font-size:16px;border:1.5px solid #c8d2cf;border-radius:8px;margin-top:3px"></label>';
+  box.innerHTML = '<div class="card"><h2 style="margin-top:0">Choose a size</h2>' +
+    pricing.printSizes.map((z, i) =>
+      '<label style="display:flex;align-items:center;gap:10px;border:1.5px solid #dde4e2;border-radius:10px;padding:10px 12px;margin:8px 0;cursor:pointer">' +
+      '<input type="radio" name="size" value="' + z.id + '"' + (i === 0 ? ' checked' : '') + ' style="accent-color:#0f766e">' +
+      '<b>' + z.label + '</b> <span class="muted">tall</span><span style="margin-left:auto;font-weight:700">' + money(z.cents) + '</span></label>'
+    ).join('') +
+    '<h2>Shipping address <span class="muted" style="font-size:13px;font-weight:400">(US only)</span></h2>' +
+    f('sName', 'Full name', 'autocomplete="name"') +
+    f('sLine1', 'Street address', 'autocomplete="address-line1"') +
+    f('sLine2', 'Apt, suite (optional)', 'autocomplete="address-line2"') +
+    '<div style="display:grid;grid-template-columns:2fr 1fr 1.3fr;gap:8px">' +
+    f('sCity', 'City', 'autocomplete="address-level2"') +
+    f('sState', 'State', 'maxlength="2" placeholder="CA" autocomplete="address-level1"') +
+    f('sZip', 'ZIP', 'inputmode="numeric" autocomplete="postal-code"') + '</div>' +
+    f('sPhone', 'Phone (optional, for delivery)', 'type="tel" autocomplete="tel"') +
+    '<button class="btn" id="payPrint">Continue to payment</button><div id="printErr"></div></div>';
+  document.getElementById('payPrint').onclick = async (e) => {
+    const v = (id) => document.getElementById(id).value;
+    e.currentTarget.disabled = true;
+    const res = await fetch(withAuth('/api/jobs/' + jobId + '/print-checkout'), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ size: document.querySelector('input[name=size]:checked').value,
+        shipping: { name: v('sName'), line1: v('sLine1'), line2: v('sLine2'), city: v('sCity'), state: v('sState'), zip: v('sZip'), phone: v('sPhone') } }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      document.getElementById('printErr').innerHTML = '<div class="error">' + esc(data.error || 'Something went wrong') + '</div>';
+      e.currentTarget.disabled = false;
+      return;
+    }
+    location.href = data.payUrl;
+  };
+}
+
 async function act(action) {
   try {
     const res = await fetch(withAuth('/api/jobs/' + jobId + '/' + action), { method: 'POST' });
@@ -179,6 +250,7 @@ setInterval(() => {
 setInterval(poll, 3000);
 poll();
 </script>
+<script src="checkout.js"></script>
 <script src="legal.js"></script>
 </body>
 </html>
