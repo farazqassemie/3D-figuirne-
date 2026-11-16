@@ -20,7 +20,7 @@
 </head>
 <body>
 <h1>Turn yourself into a 3D model</h1>
-<p class="muted">Pick how it's made, choose your generations (from $2.99), then upload a few phone photos. Your model is ready in minutes.</p>
+<p class="muted">Pick how it's made, upload a few phone photos, and get your 3D model in minutes. From $2.99.</p>
 <p class="muted" id="myLink" hidden><a href="#">My generations &amp; models</a></p>
 
 <div class="card">
@@ -58,7 +58,6 @@ fetch('/api/engines').then(r => r.json()).then(d => {
     }
     b.classList.remove('disabled');
     b.setAttribute('href', b.dataset.href);
-    b.addEventListener('click', (ev) => { ev.preventDefault(); choose(b.dataset.engine, b.dataset.subject || 'figurine'); });
   });
   if (engines.some(e => e.id === 'model2')) {
     document.getElementById('m2Note').hidden = true;
@@ -68,21 +67,6 @@ fetch('/api/engines').then(r => r.json()).then(d => {
 }).catch(() => {
   document.getElementById('m2Note').textContent = 'This option isn’t available right now.';
 });
-// Picking an option: a returning customer with generations left goes straight to
-// the photos; everyone else first picks a generation pack and pays.
-async function choose(engine, subject) {
-  const saved = savedPass();
-  if (saved) {
-    const p = await fetch('/api/passes/' + saved.pass + '?pt=' + saved.pt).then(r => r.ok ? r.json() : null).catch(() => null);
-    if (p && p.remaining > 0) {
-      location.href = 'flow3.html?' + new URLSearchParams({ engine, subject, pass: saved.pass, pt: saved.pt });
-      return;
-    }
-    if (p) return openPackBox({ engine, subject, pass: saved.pass, pt: saved.pt });
-  }
-  openPackBox({ engine, subject });
-}
-
 fetch('/api/config').then(r => r.json()).then(c => {
   const name = { 'fal-rodin': 'Model 1', hi3d: 'Model 2', mock: 'mock' }[c.preview] || c.preview;
   document.getElementById('prov').textContent = 'default: ' + name;

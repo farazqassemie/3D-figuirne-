@@ -33,7 +33,10 @@
   `;
   document.head.appendChild(css);
 
-  window.openPackBox = async function ({ engine, subject, pass, pt } = {}) {
+  // prepare(): optional async step run when the customer clicks Continue, before
+  // checkout (the upload page uses it to save the photos as an unpaid draft).
+  // It returns extra fields for the checkout request.
+  window.openPackBox = async function ({ engine, subject, pass, pt, prepare } = {}) {
     let pricing;
     try { pricing = await fetch('/api/pricing').then((r) => r.json()); } catch { alert('Network problem — please try again.'); return; }
     const back = document.createElement('div');
@@ -65,12 +68,17 @@
       if (topUp) { body.pass = pass; body.pt = pt; } else { body.email = back.querySelector('#pkEmail').value; }
       btn.disabled = true;
       try {
+        if (prepare) {
+          btn.textContent = 'Saving your photos…';
+          Object.assign(body, await prepare());
+        }
         const res = await fetch('/api/checkout/pack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || 'Something went wrong (' + res.status + ')');
         location.href = data.payUrl;
       } catch (err) {
         back.querySelector('#pkErr').innerHTML = '<div class="error">' + String(err.message).replace(/</g, '&lt;') + '</div>';
+        btn.textContent = 'Continue to payment';
         btn.disabled = false;
       }
     };

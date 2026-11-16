@@ -216,34 +216,34 @@ grid.addEventListener('drop', (e) => {
 // Someone may open a locked option's link directly — tell them before they take
 // photos. (The server also rejects locked options, so this is only for clarity.)
 // ---- Paid generations ------------------------------------------------------
-// The pass (from the payment) carries the customer's generations. The owner can
-// test without paying by opening this page with ?token=ADMIN_TOKEN.
-const PASS = params.get('pass'), PT = params.get('pt'), ADMIN_TOKEN = params.get('token');
+// Customers take their photos first. When they click Create:
+//  - generations left on their pass → the model is made straight away;
+//  - none yet → the price box opens; the photos are saved as an unpaid draft,
+//    and paying starts the generation automatically.
+// The owner can test without paying by opening this page with ?token=ADMIN_TOKEN.
+const saved = savedPass();
+const PASS = params.get('pass') || (saved && saved.pass);
+const PT = params.get('pt') || (saved && saved.pt);
+const ADMIN_TOKEN = params.get('token');
 const passBar = document.getElementById('passBar');
-function hideUpload() {
-  grid.hidden = true; submit.hidden = true; document.getElementById('consent').hidden = true;
-}
-function needCredits(text, topUp) {
-  hideUpload();
-  passBar.hidden = false;
-  passBar.innerHTML = '<p style="margin:0 0 6px">' + text + '</p><button class="btn" id="buyBtn">See prices</button>';
-  document.getElementById('buyBtn').onclick = () =>
-    openPackBox(topUp ? { engine, subject, pass: PASS, pt: PT } : { engine, subject });
-}
+let credits = 0; // generations left on the pass (0 = must buy first)
+
 async function loadPass() {
   if (ADMIN_TOKEN) {
     passBar.hidden = false;
     passBar.innerHTML = '<span class="muted">Owner test mode — no generation is charged to a customer.</span>';
     return;
   }
-  if (!PASS || !PT) return needCredits('Choose your generations to start.', false);
-  const p = await fetch('/api/passes/' + encodeURIComponent(PASS) + '?pt=' + encodeURIComponent(PT)).then(r => r.ok ? r.json() : null).catch(() => null);
-  if (!p) return needCredits('We couldn’t find your generations. Please check your link, or buy a pack.', false);
+  const p = PASS && PT
+    ? await fetch('/api/passes/' + encodeURIComponent(PASS) + '?pt=' + encodeURIComponent(PT)).then(r => r.ok ? r.json() : null).catch(() => null)
+    : null;
+  if (!p) return;
   rememberPass(PASS, PT);
-  if (p.remaining < 1) return needCredits('You have no generations left.', true);
+  credits = p.remaining;
   passBar.hidden = false;
   passBar.innerHTML =
     '<div class="left">You have ' + p.remaining + ' generation' + (p.remaining === 1 ? '' : 's') + ' left</div>' +
+    (p.remaining < 1 ? '<span class="muted" style="font-size:13px">You’ll choose more when you click Create. </span>' : '') +
     '<span class="muted" style="font-size:13px">Keep your private link to come back to your models: </span>' +
     '<button class="copy" id="copyLink">copy my link</button>';
   document.getElementById('copyLink').onclick = async (e) => {
@@ -264,15 +264,14 @@ fetch('/api/engines').then(r => r.json()).then(d => {
   }
 }).catch(() => {});
 
-submit.addEventListener('click', async () => {
-  submit.disabled = true;
-  status.innerHTML = '<div class="spin"></div><p class="muted" style="text-align:center">Uploading your photos…</p>';
+// The upload form: consent first (so the server sees it before any photo),
+// then the chosen option, then the photos in the order the engine expects.
+function buildForm(extra) {
   const form = new FormData();
-  // Consent first, so the server sees it before any photo.
   form.append('consentVersion', CONSENT_VERSION);
   consentBoxes.forEach((b) => form.append(b.name, b.checked ? 'yes' : 'no'));
-  if (PASS) { form.append('pass', PASS); form.append('pt', PT); }
-  form.append('engine', engine); // chosen engine/subject first, then the files
+  for (const [k, v] of Object.entries(extra || {})) form.append(k, v);
+  form.append('engine', engine);
   if (engine === 'model2') {
     form.append('subject', subject);
     // Model 2 is VIEW-AWARE: it reads photos positionally as front/back/left/right.
@@ -293,13 +292,45 @@ submit.addEventListener('click', async () => {
     const PRIORITY = [0, 1, 3, 2, 4, 5];
     PRIORITY.forEach((i) => files[i] && form.append('photos', files[i]));
   }
+  return form;
+}
+
+async function upload(extra) {
+  const res = await fetch('/api/flow3', { method: 'POST', body: buildForm(extra), headers: ADMIN_TOKEN ? { 'x-admin-token': ADMIN_TOKEN } : {} });
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
+// No generations left: open the price box. Clicking Continue saves the photos
+// as a draft (once), then goes to payment; paying starts the generation.
+let draft = null;
+function askToPay() {
+  status.innerHTML = '';
+  updateSubmit();
+  openPackBox({
+    engine, subject,
+    ...(PASS && PT ? { pass: PASS, pt: PT } : {}),
+    prepare: async () => {
+      if (!draft) {
+        const { res, data } = await upload({ draft: '1' });
+        if (!res.ok || !data.draft) throw new Error(data.error || 'Upload failed (' + res.status + ')');
+        draft = data;
+      }
+      return { draftJob: draft.jobId, draftToken: draft.token };
+    },
+  });
+}
+
+submit.addEventListener('click', async () => {
+  if (!ADMIN_TOKEN && credits < 1) return askToPay();
+  submit.disabled = true;
+  status.innerHTML = '<div class="spin"></div><p class="muted" style="text-align:center">Uploading your photos…</p>';
   try {
-    const res = await fetch('/api/flow3', { method: 'POST', body: form, headers: ADMIN_TOKEN ? { 'x-admin-token': ADMIN_TOKEN } : {} });
-    const data = await res.json().catch(() => ({}));
-    if (res.status === 402) { status.innerHTML = ''; return needCredits(data.error, !!PASS); }
+    const { res, data } = await upload(PASS && !ADMIN_TOKEN ? { pass: PASS, pt: PT } : {});
+    if (res.status === 402) { credits = 0; return askToPay(); }
     if (!res.ok) throw new Error(data.error || 'Upload failed (' + res.status + ')');
     location.href = 'review.html?job=' + data.jobId + (data.token ? '&t=' + data.token : '') +
-      (PASS ? '&pass=' + PASS + '&pt=' + PT : '') + (ADMIN_TOKEN ? '&token=' + encodeURIComponent(ADMIN_TOKEN) : '');
+      (PASS && !ADMIN_TOKEN ? '&pass=' + PASS + '&pt=' + PT : '') + (ADMIN_TOKEN ? '&token=' + encodeURIComponent(ADMIN_TOKEN) : '');
   } catch (err) {
     status.innerHTML = '<div class="error">' + err.message + '</div>';
     updateSubmit();

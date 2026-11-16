@@ -153,6 +153,17 @@ app.post('/api/flow3', withNewJob(3), upload.array('photos', 8), (req, res) => {
   // Every generation is paid for from the customer's pass (the owner can test
   // with the admin token). Taken LAST, after every other check has passed.
   let passId = null;
+  // No paid generations yet: keep the photos as an unpaid DRAFT. The price box
+  // then sends the customer to pay, and the payment starts this generation.
+  if (!isAdmin(req) && req.body?.draft === '1') {
+    const consent = {
+      version: CONSENT_VERSION, at: new Date().toISOString(),
+      ...Object.fromEntries(CONSENT_FIELDS.map((f) => [f, true])),
+      userAgent: String(req.get('user-agent') || '').slice(0, 300),
+    };
+    update(req.jobId, { status: 'draft', consent, draftFiles: req.files.map((f) => f.path), ...choice });
+    return res.json({ jobId: req.jobId, token: getJob(req.jobId).token, draft: true });
+  }
   if (!isAdmin(req)) {
     const pass = getPass(req.body?.pass);
     if (!ownsPass(pass, req.body?.pt)) return reject(402, 'Please buy a generation pack first.');
@@ -203,6 +214,7 @@ app.post('/api/checkout/pack', (req, res, next) => {
       packId: req.body?.pack, email: req.body?.email,
       engine: req.body?.engine, subject: req.body?.subject,
       topUpPassId: req.body?.pass, topUpToken: req.body?.pt,
+      draftJobId: req.body?.draftJob, draftToken: req.body?.draftToken,
     });
     res.json({ payUrl: payUrl(payment) });
   } catch (err) { next(err); }
