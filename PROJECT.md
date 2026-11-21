@@ -425,7 +425,7 @@ Push to `main` → Railway rebuilds the Docker image and redeploys automatically
 ## 14. Open items / to-do (as of 2026-11-21)
 
 **Before a real launch**
-1. ~~Set the business details~~ Done 2026-11-21 (built-in defaults, see §10). The owner should confirm the exact registered LLC name (they typed "Print3d Productiond LLC"; "Productions" was used to match the email domain).
+1. ~~Set the business details~~ Done 2026-11-21 (built-in defaults, see §10). Owner confirmed the legal name "Print3d Productions LLC".
 2. **Lawyer review**, top issue: Model 2's provider (Hi3D / Hitem3D, Math Magic) appears to be **Hong Kong/China-based**. Under the US DOJ Data Security Program (28 CFR Part 202), sending biometric data of **1,000 or more US persons within 12 months** to a "country of concern" (China incl. Hong Kong) is restricted. Also review: BIPA (Illinois), Texas CUBI, Washington My Health Data Act, CCPA/CPRA and other state laws, vendor-side retention by the AI providers, whether to add arbitration, a registered DMCA agent, and business insurance.
 3. **Delete test jobs made before the consent update** (jobs without a `consent` record).
 4. **Choose and connect a real payment provider** (§7), and decide sales tax and shipping costs/methods (prices currently include no tax or shipping line).
