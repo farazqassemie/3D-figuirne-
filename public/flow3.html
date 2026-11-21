@@ -162,7 +162,7 @@ function setFile(i, f) {
 
 // The consent boxes must all be ticked before anything is uploaded. The server
 // checks the same fields and records which consent version was agreed to.
-const CONSENT_VERSION = '2026-11-16';
+const CONSENT_VERSION = '2026-11-21';
 const consentBoxes = [...document.querySelectorAll('#consent input[type=checkbox]')];
 consentBoxes.forEach((b) => b.addEventListener('change', updateSubmit));
 

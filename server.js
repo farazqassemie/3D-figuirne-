@@ -16,7 +16,7 @@ import {
 // Version of the consent wording on the upload page (flow3.html). Bump it
 // whenever that wording, the Terms, or the Privacy Policy change materially, so
 // each job records exactly which text the customer agreed to.
-const CONSENT_VERSION = '2026-11-16';
+const CONSENT_VERSION = '2026-11-21';
 const CONSENT_FIELDS = ['consentAge', 'consentRights', 'consentBiometric', 'consentTerms'];
 
 const app = express();
@@ -317,10 +317,11 @@ app.get('/api/config', (req, res) => {
 app.get('/api/legal', (req, res) => {
   const env = (k) => (process.env[k] || '').trim();
   res.json({
-    businessName: env('LEGAL_BUSINESS_NAME'),
-    contactEmail: env('LEGAL_CONTACT_EMAIL'),
-    mailingAddress: env('LEGAL_MAILING_ADDRESS'),
-    governingState: env('LEGAL_GOVERNING_STATE'),
+    // Defaults are the owner's business details; a Railway variable overrides them.
+    businessName: env('LEGAL_BUSINESS_NAME') || 'Print3d Productions LLC',
+    contactEmail: env('LEGAL_CONTACT_EMAIL') || 'info@print3dproductions.com',
+    mailingAddress: env('LEGAL_MAILING_ADDRESS') || '4335 Nobel Drive, #97, San Diego, CA 92122',
+    governingState: env('LEGAL_GOVERNING_STATE') || 'California',
     retention: retentionDays(),
     consentVersion: CONSENT_VERSION,
   });
